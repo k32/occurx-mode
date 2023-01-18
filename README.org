@@ -1,0 +1,4 @@
+#+TITLE: snabbkaffe-mode
+
+An Emacs plugin for filtering log files.
+It improves upon =occur= command by letting the user specify the search pattern using [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Rx-Notation.html][rx]] notation written in a regular buffer (rather than the minibuffer).
