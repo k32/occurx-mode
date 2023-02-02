@@ -2,8 +2,8 @@
 
 ;; Copyright (C) 2023  k32
 
-;; Author: k32 <k32@example.com>
-;; Keywords: log occur
+;; Author: k32 <example@example.com>
+;; Keywords: logs occur
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -26,6 +26,9 @@
 
 (require 'rx)
 (require 'hi-lock)
+(require 'cl-lib)
+
+;;; Customizable settings
 
 (setq logview--snk-bindings
       '((=> (a b) (seq a (* blank) "=>" (* blank) b))
@@ -43,6 +46,161 @@
   :type '(repeat face)
   :group 'logview)
 
+;;; Source buffer
+
+;;;###autoload
+(define-minor-mode logview-mode
+  "Minor mode for viewing logs"
+  :lighter "🪵"
+  :keymap (list (cons (kbd "q") #'quit-window)
+                (cons (kbd "o") #'logview-pattern-buffer)
+                (cons (kbd "<SPC>") #'scroll-up-command)
+                (cons (kbd "C-c C-c") (lambda ()
+                                        (logview-pattern-buffer)
+                                        (logview-run))))
+  (read-only-mode t))
+
+(defun logview--occur-buffer (source-buffer)
+  "Create or get occur buffer for the given SOURCE-BUFFER"
+  (get-buffer-create (concat "*Occur* " (buffer-name source-buffer)) t))
+
+;;; Occur
+(defun logview--run-pattern (pattern begin bound)
+  "Run a list of regular expressions PATTERN.
+
+If all of them match, return list of positions of matches, `nil' overwise."
+  (cl-loop for rx in pattern
+           if (progn (goto-char begin) (re-search-forward rx bound t))
+             collect `(,(- (match-beginning 0) begin) . ,(- (match-end 0) begin))
+           else
+             return nil
+           end))
+
+(defun logview--on-match (begin bound matches face orig-buf occur-buf)
+  "This function is called when a pattern match is found"
+  (with-current-buffer occur-buf
+    (let ((chunk-begin (point)))
+      (insert-buffer-substring orig-buf begin bound)
+      ;;   Insert newline if not at the end of line:
+      (unless (bolp)
+        (insert-char ?\n))
+      (put-text-property chunk-begin (point) 'logview-pointer begin)
+      ;;   Highlight text:
+      (dolist (m matches)
+        (let* ((hl-begin (+ chunk-begin (pop m)))
+               (hl-end (+ chunk-begin m)))
+          (put-text-property hl-begin hl-end 'face face))))))
+
+(defun logview--run-patterns (delimiter patterns orig-buf occur-buf)
+  (cl-loop while
+           (let* ((begin (point))
+                  (delim-end (re-search-forward delimiter nil t))
+                  (bound (if delim-end
+                             (match-beginning 0)
+                           (point-max))))
+             (cl-loop for pattern in patterns
+                      for matches = (logview--run-pattern (plist-get pattern :rx) begin bound)
+                      if matches
+                        return (logview--on-match begin bound matches (plist-get pattern :face) orig-buf occur-buf)
+                      end)
+             (when delim-end (goto-char delim-end))
+             delim-end)))
+
+(defun logview--occur (pattern-buf orig-buf delimiter patterns)
+  (let ((occur-buf (logview--occur-buffer (current-buffer))))
+    (display-buffer occur-buf
+                    `((display-buffer-reuse-window display-buffer-in-atom-window)
+                      (side . left)
+                      (window . ,(window-parent))))
+    (with-current-buffer occur-buf
+      (logview-occur-mode)
+      (setq-local logview-orig-buffer orig-buf)
+      (setq-local logview-pattern-buffer pattern-buf)
+      (read-only-mode -1)
+      (erase-buffer))
+    (with-current-buffer orig-buf
+      (save-excursion
+        (goto-char (point-min))
+        (logview--run-patterns delimiter patterns orig-buf occur-buf)))
+    (with-current-buffer occur-buf
+      (read-only-mode))))
+
+;;;###autoload
+(defun logview-run ()
+  "Read a set of `rx' patterns from a specified buffer and run `occur' with them.
+Colorize the occur buffer."
+  (interactive "")
+  (let ((raw-patterns (logview--read-patterns (current-buffer)))
+        (delimiter "\n")) ; TODO
+    (message "Filtering patterns %S" raw-patterns)
+    (let ((compiled-patterns (logview--compile-patterns raw-patterns)))
+      (dolist (buf logview-dependent-buffers)
+        (logview--occur (current-buffer) buf delimiter compiled-patterns)))))
+
+;;;; Occur major mode
+(defun logview-occur-visit-source ()
+  "Jump to the occurrance in the original buffer"
+  (interactive)
+  (let ((pos (get-text-property (point) 'logview-pointer)))
+    (when pos
+      (switch-to-buffer-other-window logview-orig-buffer)
+      (goto-char pos))))
+
+(defvar logview-occur-mode-map nil "Keymap for logview-occur-mode")
+(setq logview-occur-mode-map (make-sparse-keymap))
+
+(define-key logview-occur-mode-map (kbd "<return>") #'logview-occur-visit-source)
+(define-key logview-occur-mode-map (kbd "o") #'logview-pattern-buffer)
+(define-key logview-occur-mode-map [mouse-1] #'logview-occur-visit-source)
+
+(define-derived-mode logview-occur-mode fundamental-mode
+  "🪡"
+  :syntax-table nil
+  :abbrev-table nil
+  (setq-local logview-orig-buffer nil))
+
+;;;; Pattern buffer
+
+(defun logview--buffer-to-sexps (buffer)
+  "Parse BUFFER into a list of sexps"
+  (with-current-buffer buffer
+    (save-excursion
+      (let (sexps
+            sexp
+            (line-start 0)
+            line-end)
+        (goto-char (point-min))
+        (ignore-errors
+          (while (setq sexp (read (current-buffer)))
+            (setq line-end (line-number-at-pos))
+            (push (list line-start line-end sexp) sexps)
+            (setq line-start line-end)))
+        (reverse sexps)))))
+
+(defun logview--normalize-pattern (input)
+  "Produce a normalized pattern from the raw user input
+Result type: (:start LINE :end LINE :face FACE :rx LIST-OF-RX-PATTERNS)"
+  (let ((line-start (pop input))
+        (line-end   (pop input))
+        (pattern    (pop input)))
+    (pcase pattern
+      ((pred stringp)
+       ;; Single string pattern:
+       `(:start ,line-start :end ,line-end :face nil :rx (,pattern)))
+      ((pred listp)
+       ;; Complex pattern, try to extract the keywords and treat the rest of the list as rx pattern:
+       (let (face keyw)
+         (while (keywordp (setq keyw (car pattern)))
+           (setq pattern (cdr pattern))
+           (pcase keyw
+             (:face (setq face (pop pattern)))))
+         `(:start ,line-start :end ,line-end :face ,face :rx ,pattern))))))
+
+(defun logview--read-patterns (buffer)
+  "Read patterns from BUFFER as s-exps"
+  (let ((patterns (logview--buffer-to-sexps buffer)))
+    (mapcar #'logview--normalize-pattern patterns)))
+
 (defun logview--intercalate (separator l)
   "Return a list where SEPARATOR is inserted between elements of L."
   (let (ret)
@@ -58,21 +216,23 @@ Use `seq' if you need standard rx behavior."
     ((pred listp)   (mapcar #'logview--preprocess-rx pat))
     (_              pat)))
 
-(defun logview--build-re (pat)
-  "Transform pattern to a regexp."
-  (rx-let-eval logview--snk-bindings
-    (rx-to-string `(seq bol (* nonl) ,(logview--preprocess-rx pat) (* nonl) eol)
-                  t)))
-
-;;;###autoload
-(define-minor-mode logview-mode
-  "Minor mode for viewing traces"
-  :lighter "☕"
-  :keymap (list (cons (kbd "q") #'quit-window)
-                (cons (kbd "o") #'logview-occur)
-                (cons (kbd "<SPC>") #'scroll-up-command))
-  (toggle-truncate-lines t)
-  (read-only-mode t))
+(defun logview--compile-patterns (patterns)
+  "Compile rx patterns into string form"
+  (let ((faces logview-default-faces))
+    (mapcar
+     (lambda (pat)
+       ;; Cycle faces if reached the end of the default list:
+       (unless faces (setq faces logview-default-faces))
+       ;; Compile pattern:
+       (let* ((raw-patterns (plist-get pat :rx))
+              (build-re (lambda (pat)
+                          (rx-let-eval logview-rx-bindings
+                            (rx-to-string
+                             (logview--preprocess-rx pat) t))))
+              (patterns (mapcar build-re raw-patterns))
+              (face (or (plist-get pat :face) (pop faces))))
+         (plist-put (plist-put pat :rx patterns) :face face)))
+     patterns)))
 
 ;;;###autoload
 (defun logview--find-pattern-buffer (change)
@@ -81,81 +241,32 @@ Use `seq' if you need standard rx behavior."
                (get-buffer logview-pattern-buffer) ; Buffer's alive
                (not change))                       ; User doesn't want to change it
     (setq-local logview-pattern-buffer
-                (read-buffer "Buffer containing the pattern:" (concat (buffer-name) "-pattern.el"))))
+                (find-file-noselect (read-file-name "Buffer containing the pattern:" (concat (buffer-name) "-pattern.el")))))
   logview-pattern-buffer)
 
-(defun logview--show-pattern-buffer (change)
-  "Find or create a buffer that stores the pattern for the current buffer."
+;;;###autoload
+(defun logview-pattern-buffer (&optional change)
+  "Switch to the pattern buffer"
+  (interactive "P")
   (let ((orig-buf (buffer-name))
         (pattern-buf (logview--find-pattern-buffer change)))
     (select-window
      (display-buffer (get-buffer-create pattern-buf)
-                     '((display-buffer-reuse-window display-buffer-in-direction)
+                     '((display-buffer-reuse-window display-buffer-in-atom-window)
                        (window-height . 8)
-                       (direction . bottom))))
+                       (side . below))))
     (logview-pattern-mode)
     (push orig-buf logview-dependent-buffers)
     pattern-buf))
 
-(defun logview--read-patterns (buffer)
-  "Read regexps from the pattern buffer."
-  ;; Parse sexp:
-  (let ((patterns (with-current-buffer buffer
-                    (goto-char (point-min))
-                    (read (get-buffer buffer)))))
-    (mapcar
-     (lambda (body)
-      ;; Parse the pattern:
-       (let (face keyw)
-         (while (keywordp (setq keyw (car body)))
-          (setq body (cdr body))
-          (pcase keyw
-	          (:face (setq face (pop body)))))
-        (list :face face :rx (car body))))
-     patterns)))
-
-(defun logview--build-occur-re (patterns)
-  "Join all patterns with `or' operation to create a regexp for `occur'."
-  (logview--build-re
-   (cons 'or
-         (mapcar (lambda (i) (plist-get i :rx)) patterns))))
-
-(defun logview--colorize (patterns)
-  (let ((faces logview-default-faces))
-    (dolist (i patterns)
-      (hi-lock-face-buffer (logview--build-re (plist-get i :rx))
-                           (or (plist-get i :face) (pop faces))))))
-
-;;;###autoload
-(defun logview-occur (&optional change)
-  "Switch to the pattern buffer"
-  (interactive "P")
-  (logview--show-pattern-buffer change))
-
-;;;###autoload
-(defun logview-run-pattern ()
-  "Read a set of `rx' patterns from a specified buffer and run `occur' with them.
-Colorize the occur buffer."
-  (interactive "")
-  (let*
-      ((patterns (logview--read-patterns (current-buffer)))
-       (occur-re (logview--build-occur-re patterns)))
-    (message "Patterns %S" patterns)
-    (dolist (buf logview-dependent-buffers)
-      (with-current-buffer buf
-        (occur occur-re)
-        (with-current-buffer "*Occur*"
-          (logview--colorize patterns))))))
-
 (defvar logview-pattern-mode-map nil "Keymap for logview-pattern-mode")
 (setq logview-pattern-mode-map (make-sparse-keymap))
-(define-key logview-pattern-mode-map (kbd "C-c C-c") 'logview-run-pattern)
+(define-key logview-pattern-mode-map (kbd "C-c C-c") #'logview-run)
 
 (define-derived-mode logview-pattern-mode emacs-lisp-mode
   "🔍"
   :syntax-table nil
   :abbrev-table nil
-
   (setq-local logview-dependent-buffers nil))
 
 (provide 'logview-mode)
