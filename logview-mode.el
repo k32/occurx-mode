@@ -76,35 +76,45 @@ If all of them match, return list of positions of matches, `nil' overwise."
              return nil
            end))
 
-(defun logview--on-match (begin bound matches face orig-buf occur-buf)
+(defun logview--on-match (entry-beginning begin bound matches face orig-buf occur-buf)
   "This function is called when a pattern match is found"
   (with-current-buffer occur-buf
-    (let ((chunk-begin (point)))
-      (insert-buffer-substring orig-buf begin bound)
+    (let* ((chunk-begin (point))
+           (offset (+ chunk-begin (- begin entry-beginning))))
+      (insert-buffer-substring orig-buf entry-beginning bound)
       ;;   Insert newline if not at the end of line:
       (unless (bolp)
         (insert-char ?\n))
       (put-text-property chunk-begin (point) 'logview-pointer begin)
       ;;   Highlight text:
       (dolist (m matches)
-        (let* ((hl-begin (+ chunk-begin (pop m)))
-               (hl-end (+ chunk-begin m)))
+        (let* ((hl-begin (+ offset (pop m)))
+               (hl-end (+ offset m)))
           (put-text-property hl-begin hl-end 'face face))))))
 
 (defun logview--run-patterns (delimiter patterns orig-buf occur-buf)
-  (cl-loop while
-           (let* ((begin (point))
-                  (delim-end (re-search-forward delimiter nil t))
-                  (bound (if delim-end
-                             (match-beginning 0)
-                           (point-max))))
-             (cl-loop for pattern in patterns
-                      for matches = (logview--run-pattern (plist-get pattern :rx) begin bound)
-                      if matches
-                        return (logview--on-match begin bound matches (plist-get pattern :face) orig-buf occur-buf)
-                      end)
-             (when delim-end (goto-char delim-end))
-             delim-end)))
+  (let (entry-beginning
+        (body-beginning (re-search-forward delimiter nil t))
+        next-body-beginning
+        end)
+    (while body-beginning
+      (forward-char)
+      (setq entry-beginning (match-beginning 0)
+            next-body-beginning (re-search-forward delimiter nil t)
+            end (if next-body-beginning (match-beginning 0) (point-max)))
+      (cl-loop for pattern in patterns
+               for matches = (logview--run-pattern (plist-get pattern :rx)
+                                                   body-beginning
+                                                   end)
+               if matches
+               return (logview--on-match entry-beginning body-beginning end
+                                         matches
+                                         (plist-get pattern :face)
+                                         orig-buf occur-buf)
+               end)
+      (setq body-beginning next-body-beginning
+            entry-beginning end)
+      (when next-body-beginning (goto-char next-body-beginning)))))
 
 (defun logview--occur (pattern-buf orig-buf delimiter patterns)
   (let ((occur-buf (logview--occur-buffer (current-buffer))))
@@ -130,12 +140,12 @@ If all of them match, return list of positions of matches, `nil' overwise."
   "Read a set of `rx' patterns from a specified buffer and run `occur' with them.
 Colorize the occur buffer."
   (interactive "")
-  (let ((raw-patterns (logview--read-patterns (current-buffer)))
-        (delimiter "\n")) ; TODO
-    (message "Filtering patterns %S" raw-patterns)
-    (let ((compiled-patterns (logview--compile-patterns raw-patterns)))
-      (dolist (buf logview-dependent-buffers)
-        (logview--occur (current-buffer) buf delimiter compiled-patterns)))))
+  (pcase-exhaustive (logview--read-patterns (current-buffer))
+    (`(,delimiter . ,raw-patterns)
+     (message "Filtering patterns %S with delimiter %S" raw-patterns delimiter)
+     (let ((compiled-patterns (logview--compile-patterns raw-patterns)))
+       (dolist (buf logview-dependent-buffers)
+         (logview--occur (current-buffer) buf delimiter compiled-patterns))))))
 
 ;;;; Occur major mode
 (defun logview-occur-visit-source ()
@@ -183,7 +193,7 @@ Result type: (:start LINE :end LINE :face FACE :rx LIST-OF-RX-PATTERNS)"
   (let ((line-start (pop input))
         (line-end   (pop input))
         (pattern    (pop input)))
-    (pcase pattern
+    (pcase-exhaustive pattern
       ((pred stringp)
        ;; Single string pattern:
        `(:start ,line-start :end ,line-end :face nil :rx (,pattern)))
@@ -198,8 +208,15 @@ Result type: (:start LINE :end LINE :face FACE :rx LIST-OF-RX-PATTERNS)"
 
 (defun logview--read-patterns (buffer)
   "Read patterns from BUFFER as s-exps"
-  (let ((patterns (logview--buffer-to-sexps buffer)))
-    (mapcar #'logview--normalize-pattern patterns)))
+  (let* ((patterns (logview--buffer-to-sexps buffer))
+         (delimiter '(or bos bol))
+         result
+         (normalize (lambda (input)
+                      (pcase-exhaustive input
+                        (`(,_ ,_ (delimiter ,del))   (setq delimiter del))
+                        (_                           (push (logview--normalize-pattern input) result))))))
+    (mapcar normalize patterns)
+    `(,(logview--rx-compile delimiter) . ,result)))
 
 (defun logview--intercalate (separator l)
   "Return a list where SEPARATOR is inserted between elements of L."
@@ -216,6 +233,11 @@ Use `seq' if you need standard rx behavior."
     ((pred listp)   (mapcar #'logview--preprocess-rx pat))
     (_              pat)))
 
+(defun logview--rx-compile (pat)
+  "Compile rx pattern PAT to string"
+  (rx-let-eval logview-rx-bindings
+    (rx-to-string (logview--preprocess-rx pat) t)))
+
 (defun logview--compile-patterns (patterns)
   "Compile rx patterns into string form"
   (let ((faces logview-default-faces))
@@ -225,11 +247,7 @@ Use `seq' if you need standard rx behavior."
        (unless faces (setq faces logview-default-faces))
        ;; Compile pattern:
        (let* ((raw-patterns (plist-get pat :rx))
-              (build-re (lambda (pat)
-                          (rx-let-eval logview-rx-bindings
-                            (rx-to-string
-                             (logview--preprocess-rx pat) t))))
-              (patterns (mapcar build-re raw-patterns))
+              (patterns (mapcar #'logview--rx-compile raw-patterns))
               (face (or (plist-get pat :face) (pop faces))))
          (plist-put (plist-put pat :rx patterns) :face face)))
      patterns)))
