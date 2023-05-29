@@ -4,6 +4,9 @@
 
 ;; Author: k32 <example@example.com>
 ;; Keywords: logs occur
+;; Version: 0.1
+;; Homepage: https://github.com/k32/snabbkaffe-mode
+;; Package-Requires: ((emacs "25.1") (rbit "0.1"))
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -27,6 +30,7 @@
 (require 'rx)
 (require 'hi-lock)
 (require 'cl-lib)
+(require 'rbit)
 
 ;;; Customizable settings
 
@@ -41,9 +45,15 @@
   :type '(repeat sexp))
 
 (defcustom logview-default-faces
-  '(hi-pink hi-green hi-yellow hi-salmon)
+  '(hi-pink hi-green hi-blue hi-salmon)
   "List of faces used to highlight the patterns."
   :type '(repeat face)
+  :group 'logview)
+
+(defcustom logview-context
+  10
+  "Size of the context"
+  :type 'integer
   :group 'logview)
 
 ;;; Source buffer
@@ -67,61 +77,83 @@
 ;;; Occur
 (defun logview--run-pattern (pattern begin bound)
   "Run a list of regular expressions PATTERN.
+If all of them match, return list of positions of all matches, `nil' overwise."
+  (cl-loop for re in pattern
+           for found = (progn
+                         (goto-char begin)
+                         (cl-loop while (re-search-forward re bound t)
+                                  collect `(,(match-beginning 0) . ,(match-end 0))))
+           if found append found
+           else return nil))
 
-If all of them match, return list of positions of matches, `nil' overwise."
-  (cl-loop for rx in pattern
-           if (progn (goto-char begin) (re-search-forward rx bound t))
-             collect `(,(- (match-beginning 0) begin) . ,(- (match-end 0) begin))
-           else
-             return nil
-           end))
+(defun logview--match-intervals (begin bound matches)
+  (let* (acc
+         (push-interval (lambda (beg end match)
+                          (if (= beg end)
+                              acc
+                            (setq acc (rbit-set acc beg end match (lambda (a b) (or a b))))))))
+    (pcase-dolist (`(,beg . ,end) matches)
+      (funcall push-interval beg end t)
+      (funcall push-interval (max begin (- beg logview-context)) beg nil)
+      (funcall push-interval end (min bound (+ end logview-context)) nil))
+    (rbit-to-list acc)))
 
 (defun logview--on-match (entry-beginning begin bound matches face orig-buf occur-buf)
   "This function is called when a pattern match is found"
   (with-current-buffer occur-buf
-    (let* ((chunk-begin (point))
-           (offset (+ chunk-begin (- begin entry-beginning))))
-      (insert-buffer-substring orig-buf entry-beginning bound)
+    (dolist (i (logview--match-intervals entry-beginning bound
+                                         ;; TODO: add entry delimiter to the list of matches:
+                                         matches))
+      (let* ((min (pop i))
+             (max (pop i))
+             (hl (pop i))
+             (chunk-begin (point))
+             (offset (- chunk-begin min)))
+        (insert-buffer-substring orig-buf min max)
+        ;; Add property that allows to jump to the source
+        (put-text-property chunk-begin (point) 'logview-pointer min)
+        ;; Highlight fragment:
+        (when hl
+          (put-text-property chunk-begin (point) 'face face))))
       ;;   Insert newline if not at the end of line:
       (unless (bolp)
-        (insert-char ?\n))
-      (put-text-property chunk-begin (point) 'logview-pointer begin)
-      ;;   Highlight text:
-      (dolist (m matches)
-        (let* ((hl-begin (+ offset (pop m)))
-               (hl-end (+ offset m)))
-          (put-text-property hl-begin hl-end 'face face))))))
+        (insert-char ?\n))))
 
 (defun logview--run-patterns (delimiter patterns orig-buf occur-buf)
-  (let (entry-beginning
-        (body-beginning (re-search-forward delimiter nil t))
-        next-body-beginning
-        end)
+  (let (entry-beginning body-beginning next-entry-beginning next-body-beginning)
+    ;; Initialization of the loop:
+    (setq body-beginning (re-search-forward delimiter nil t)
+          entry-beginning (match-beginning 0))
+    ;; Loop over buffer:
     (while body-beginning
       (forward-char)
-      (setq entry-beginning (match-beginning 0)
-            next-body-beginning (re-search-forward delimiter nil t)
-            end (if next-body-beginning (match-beginning 0) (point-max)))
+      ;; Find next entry:
+      (setq next-body-beginning (re-search-forward delimiter nil t)
+            next-entry-beginning (if next-body-beginning (match-beginning 0) (point-max)))
+      ;; Match entry's body against patterns, stop on first match:
       (cl-loop for pattern in patterns
                for matches = (logview--run-pattern (plist-get pattern :rx)
                                                    body-beginning
-                                                   end)
+                                                   next-entry-beginning)
                if matches
-               return (logview--on-match entry-beginning body-beginning end
+               return (logview--on-match entry-beginning body-beginning next-entry-beginning
                                          matches
                                          (plist-get pattern :face)
                                          orig-buf occur-buf)
                end)
+      ;; Move forward:
       (setq body-beginning next-body-beginning
-            entry-beginning end)
-      (when next-body-beginning (goto-char next-body-beginning)))))
+            entry-beginning next-entry-beginning)
+      (when body-beginning (goto-char body-beginning)))))
 
 (defun logview--occur (pattern-buf orig-buf delimiter patterns)
   (let ((occur-buf (logview--occur-buffer (current-buffer))))
-    (display-buffer occur-buf
-                    `((display-buffer-reuse-window display-buffer-in-atom-window)
-                      (side . left)
-                      (window . ,(window-parent))))
+    (set-window-dedicated-p
+     (display-buffer occur-buf
+                     `((display-buffer-reuse-window display-buffer-in-atom-window)
+                       (side . left)
+                       (window . ,(window-parent))))
+     t)
     (with-current-buffer occur-buf
       (logview-occur-mode)
       (setq-local logview-orig-buffer orig-buf)
@@ -153,7 +185,9 @@ Colorize the occur buffer."
   (interactive)
   (let ((pos (get-text-property (point) 'logview-pointer)))
     (when pos
-      (switch-to-buffer-other-window logview-orig-buffer)
+      (select-window
+       (display-buffer logview-orig-buffer '((display-buffer-reuse-window display-buffer-in-direction)
+                                             (direction . right))))
       (goto-char pos))))
 
 (defvar logview-occur-mode-map nil "Keymap for logview-occur-mode")
@@ -229,7 +263,7 @@ Result type: (:start LINE :end LINE :face FACE :rx LIST-OF-RX-PATTERNS)"
 Change behavior of `and' operation: it inserts `(* nonl)' between each operand.
 Use `seq' if you need standard rx behavior."
   (pcase pat
-    (`(and . ,rest) (cons 'and (logview--intercalate '(* nonl) (logview--preprocess-rx rest))))
+    (`(and . ,rest) (cons 'and (logview--intercalate '(* any) (logview--preprocess-rx rest))))
     ((pred listp)   (mapcar #'logview--preprocess-rx pat))
     (_              pat)))
 
@@ -273,6 +307,7 @@ Use `seq' if you need standard rx behavior."
                      '((display-buffer-reuse-window display-buffer-in-atom-window)
                        (window-height . 8)
                        (side . below))))
+    (set-window-dedicated-p (selected-window) t)
     (logview-pattern-mode)
     (push orig-buf logview-dependent-buffers)
     pattern-buf))
