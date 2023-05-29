@@ -208,9 +208,8 @@ If all of them match, return list of positions of all matches, `nil' overwise."
   (let ((occur-buf (logview--occur-buffer (current-buffer))))
     (set-window-dedicated-p
      (display-buffer occur-buf
-                     `((display-buffer-reuse-window display-buffer-in-atom-window)
-                       (side . left)
-                       (window . ,(window-parent))))
+                     '((display-buffer-reuse-window display-buffer-in-direction)
+                       (direction . left)))
      t)
     (with-current-buffer occur-buf
       (logview-occur-mode)
@@ -329,9 +328,8 @@ Use `seq' if you need standard rx behavior."
         (pattern-buf (logview--find-pattern-buffer change)))
     (select-window
      (display-buffer (get-buffer-create pattern-buf)
-                     '((display-buffer-reuse-window display-buffer-in-atom-window)
-                       (window-height . 8)
-                       (side . below))))
+                     '((display-buffer-reuse-window display-buffer-below-selected)
+                       (window-height . 8))))
     (set-window-dedicated-p (selected-window) t)
     (logview-pattern-mode)
     (push orig-buf logview-dependent-buffers)
