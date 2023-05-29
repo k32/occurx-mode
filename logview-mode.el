@@ -35,11 +35,6 @@
 
 ;;; Customizable settings
 
-(setq logview--snk-bindings
-      '((=> (a b) (seq a (* blank) "=>" (* blank) b))
-        (kind (a) (=> "'$kind'" a))
-        (meta (k v) (=> "'~meta'" (seq "#{" (* nonl) (=> k v))))))
-
 (defcustom logview-delimiter-face
   font-lock-comment-face
   "Face used to display log delimiters"
@@ -54,9 +49,14 @@
   :group 'logview)
 
 (defcustom logview-rx-bindings
-  logview--snk-bindings
+  '((atom (or (seq ?' (+ (not ?')) ?')
+              (seq lower-case (* (in alnum ?_)))))
+    (=> (a b) (seq a (* blank) "=>" (* blank) b))
+    (kind (a) (=> "'$kind'" a))
+    (meta (k v) (=> "'~meta'" (seq "#{" (* nonl) (=> k v)))))
   "List of additional definitions that is passed to `rx-let-eval'"
-  :type '(repeat sexp))
+  :type '(repeat sexp)
+  :group 'logview)
 
 (defcustom logview-default-faces
   '(hi-pink hi-green hi-blue hi-salmon)
@@ -122,15 +122,22 @@
 (defun logview--run-pattern (p begin bound)
   "Run a list of regular expressions PATTERN.
 If all of them match, return list of positions of all matches, `nil' overwise."
-  (cl-loop for re in (logview-pattern-include p)
-           for found = (progn
-                         (goto-char begin)
-                         (cl-loop while (re-search-forward re bound t)
-                                  collect (list (match-beginning 0)
-                                                (match-end 0)
-                                                (logview-pattern-face p))))
-           if found append found
-           else return nil))
+  (let ((check-exclude
+         (lambda ()
+           (not (cl-loop for re in (logview-pattern-exclude p)
+                         for found = (progn
+                                       (goto-char begin)
+                                       (re-search-forward re bound t))
+                         when found return t)))))
+    (cl-loop for re in (logview-pattern-include p)
+             for found = (progn
+                           (goto-char begin)
+                           (cl-loop while (re-search-forward re bound t)
+                                    collect (list (match-beginning 0)
+                                                  (match-end 0)
+                                                  (logview-pattern-face p))))
+             if (and found (funcall check-exclude)) append found
+             else return nil)))
 
 (defun logview--match-intervals (entry-beginning begin bound matches)
   (let* (acc
