@@ -27,6 +27,7 @@
 
 ;;; Code:
 
+(require 'ert)
 (require 'rx)
 (require 'hi-lock)
 (require 'cl-lib)
@@ -38,6 +39,19 @@
       '((=> (a b) (seq a (* blank) "=>" (* blank) b))
         (kind (a) (=> "'$kind'" a))
         (meta (k v) (=> "'~meta'" (seq "#{" (* nonl) (=> k v))))))
+
+(defcustom logview-delimiter-face
+  font-lock-comment-face
+  "Face used to display log delimiters"
+  :type 'face
+  :group 'logview)
+
+(defface logview-ellipsis-face
+  '((((type tty)) :inherit underline)
+    (((type pc)) :inherit escape-glyph)
+    (t :height 0.6))
+   "Face used to display ellipsis replacing skipped fragment of the log entry"
+  :group 'logview)
 
 (defcustom logview-rx-bindings
   logview--snk-bindings
@@ -75,49 +89,51 @@
   (get-buffer-create (concat "*Occur* " (buffer-name source-buffer)) t))
 
 ;;; Occur
-(defun logview--run-pattern (pattern begin bound)
+(defun logview--run-pattern (pattern face begin bound)
   "Run a list of regular expressions PATTERN.
 If all of them match, return list of positions of all matches, `nil' overwise."
   (cl-loop for re in pattern
            for found = (progn
                          (goto-char begin)
                          (cl-loop while (re-search-forward re bound t)
-                                  collect `(,(match-beginning 0) . ,(match-end 0))))
+                                  collect `(,(match-beginning 0) ,(match-end 0) ,face)))
            if found append found
            else return nil))
 
-(defun logview--match-intervals (begin bound matches)
+(defun logview--match-intervals (entry-beginning begin bound matches)
   (let* (acc
-         (push-interval (lambda (beg end match)
+         (push-interval (lambda (beg end face)
                           (if (= beg end)
                               acc
-                            (setq acc (rbit-set acc beg end match (lambda (a b) (or a b))))))))
-    (pcase-dolist (`(,beg . ,end) matches)
-      (funcall push-interval beg end t)
-      (funcall push-interval (max begin (- beg logview-context)) beg nil)
+                            (setq acc (rbit-set acc beg end face (lambda (a b) (or a b))))))))
+    (pcase-dolist (`(,beg ,end ,face) matches)
+      (funcall push-interval beg end face)
+      (funcall push-interval (max entry-beginning (- beg logview-context)) beg nil)
       (funcall push-interval end (min bound (+ end logview-context)) nil))
+    (funcall push-interval entry-beginning begin logview-delimiter-face)
     (rbit-to-list acc)))
 
-(defun logview--on-match (entry-beginning begin bound matches face orig-buf occur-buf)
+(defun logview--on-match (entry-beginning begin bound matches orig-buf occur-buf)
   "This function is called when a pattern match is found"
   (with-current-buffer occur-buf
-    (dolist (i (logview--match-intervals entry-beginning bound
-                                         ;; TODO: add entry delimiter to the list of matches:
-                                         matches))
-      (let* ((min (pop i))
-             (max (pop i))
-             (hl (pop i))
-             (chunk-begin (point))
-             (offset (- chunk-begin min)))
+    (let (chunk-begin offset prev-max)
+      (pcase-dolist (`(,min ,max ,face) (logview--match-intervals entry-beginning begin bound matches))
+        ;; Insert ellipsis if fragment is skipped
+        (when (and prev-max (> min prev-max))
+          (insert "...")
+          (add-face-text-property (- (point) 3) (point) 'logview-ellipsis-face))
+        (setq chunk-begin (point)
+              offset (- chunk-begin min)
+              prev-max max)
         (insert-buffer-substring orig-buf min max)
         ;; Add property that allows to jump to the source
         (put-text-property chunk-begin (point) 'logview-pointer min)
         ;; Highlight fragment:
-        (when hl
-          (put-text-property chunk-begin (point) 'face face))))
+        (when face
+          (put-text-property chunk-begin (point) 'face face)))
       ;;   Insert newline if not at the end of line:
       (unless (bolp)
-        (insert-char ?\n))))
+        (insert-char ?\n)))))
 
 (defun logview--run-patterns (delimiter patterns orig-buf occur-buf)
   (let (entry-beginning body-beginning next-entry-beginning next-body-beginning)
@@ -133,12 +149,12 @@ If all of them match, return list of positions of all matches, `nil' overwise."
       ;; Match entry's body against patterns, stop on first match:
       (cl-loop for pattern in patterns
                for matches = (logview--run-pattern (plist-get pattern :rx)
+                                                   (plist-get pattern :face)
                                                    body-beginning
                                                    next-entry-beginning)
                if matches
                return (logview--on-match entry-beginning body-beginning next-entry-beginning
                                          matches
-                                         (plist-get pattern :face)
                                          orig-buf occur-buf)
                end)
       ;; Move forward:
