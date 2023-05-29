@@ -78,7 +78,7 @@
   :lighter "🪵"
   :keymap (list (cons (kbd "q") #'quit-window)
                 (cons (kbd "o") #'logview-pattern-buffer)
-                (cons (kbd "<SPC>") #'scroll-up-command)
+                (cons (kbd "<SPC>") #'scroll-down-command)
                 (cons (kbd "C-c C-c") (lambda ()
                                         (logview-pattern-buffer)
                                         (logview-run))))
@@ -88,15 +88,47 @@
   "Create or get occur buffer for the given SOURCE-BUFFER"
   (get-buffer-create (concat "*Occur* " (buffer-name source-buffer)) t))
 
+;; Pattern struct
+
+(defvar-local logview--default-faces logview-default-faces)
+
+(defun logview--default-face ()
+  "Get default face"
+  (unless logview--default-faces
+    (setq-local logview--default-faces logview-default-faces))
+  (pop logview--default-faces))
+
+(cl-defstruct (logview-pattern (:constructor logview-pattern--create))
+  include exclude face orig-pos)
+
+(cl-defun logview-pattern-create (&key include &key exclude &key face)
+  (let ((incl (mapcar #'logview--rx-compile include))
+        (excl (mapcar #'logview--rx-compile exclude)))
+    (logview-pattern--create :include incl
+                             :exclude excl
+                             :face (or face (logview--default-face)))))
+
+(defun logview--parse-pattern (input beg-pos end-pos)
+  (let (include exclude face head (l input))
+    (while l
+      (pcase-exhaustive l
+        (`(:face ,face . ,rest) (setq face face l rest))
+        (`(:not ,pat . ,rest)   (push pat exclude) (setq l rest))
+        (`(,pat . ,rest)        (push pat include) (setq l rest))))
+    (logview-pattern-create :face face :include include :exclude exclude)))
+
 ;;; Occur
-(defun logview--run-pattern (pattern face begin bound)
+
+(defun logview--run-pattern (p begin bound)
   "Run a list of regular expressions PATTERN.
 If all of them match, return list of positions of all matches, `nil' overwise."
-  (cl-loop for re in pattern
+  (cl-loop for re in (logview-pattern-include p)
            for found = (progn
                          (goto-char begin)
                          (cl-loop while (re-search-forward re bound t)
-                                  collect `(,(match-beginning 0) ,(match-end 0) ,face)))
+                                  collect (list (match-beginning 0)
+                                                (match-end 0)
+                                                (logview-pattern-face p))))
            if found append found
            else return nil))
 
@@ -148,8 +180,7 @@ If all of them match, return list of positions of all matches, `nil' overwise."
             next-entry-beginning (if next-body-beginning (match-beginning 0) (point-max)))
       ;; Match entry's body against patterns, stop on first match:
       (cl-loop for pattern in patterns
-               for matches = (logview--run-pattern (plist-get pattern :rx)
-                                                   (plist-get pattern :face)
+               for matches = (logview--run-pattern pattern
                                                    body-beginning
                                                    next-entry-beginning)
                if matches
@@ -185,15 +216,14 @@ If all of them match, return list of positions of all matches, `nil' overwise."
 
 ;;;###autoload
 (defun logview-run ()
-  "Read a set of `rx' patterns from a specified buffer and run `occur' with them.
-Colorize the occur buffer."
+  "Read a set of `rx' patterns from the current buffer, read list of
+``dependent buffers'' from a buffer variable and filter out
+entries matching the patterns to occur buffer"
   (interactive "")
-  (pcase-exhaustive (logview--read-patterns (current-buffer))
-    (`(,delimiter . ,raw-patterns)
-     (message "Filtering patterns %S with delimiter %S" raw-patterns delimiter)
-     (let ((compiled-patterns (logview--compile-patterns raw-patterns)))
-       (dolist (buf logview-dependent-buffers)
-         (logview--occur (current-buffer) buf delimiter compiled-patterns))))))
+  (setq-local logview--default-faces nil)
+  (seq-let (delimiter &rest patterns) (logview--read-patterns (current-buffer))
+    (dolist (buf logview-dependent-buffers)
+      (logview--occur (current-buffer) buf (logview--rx-compile delimiter) patterns))))
 
 ;;;; Occur major mode
 (defun logview-occur-visit-source ()
@@ -237,36 +267,18 @@ Colorize the occur buffer."
             (setq line-start line-end)))
         (reverse sexps)))))
 
-(defun logview--normalize-pattern (input)
-  "Produce a normalized pattern from the raw user input
-Result type: (:start LINE :end LINE :face FACE :rx LIST-OF-RX-PATTERNS)"
-  (let ((line-start (pop input))
-        (line-end   (pop input))
-        (pattern    (pop input)))
-    (pcase-exhaustive pattern
-      ((pred stringp)
-       ;; Single string pattern:
-       `(:start ,line-start :end ,line-end :face nil :rx (,pattern)))
-      ((pred listp)
-       ;; Complex pattern, try to extract the keywords and treat the rest of the list as rx pattern:
-       (let (face keyw)
-         (while (keywordp (setq keyw (car pattern)))
-           (setq pattern (cdr pattern))
-           (pcase keyw
-             (:face (setq face (pop pattern)))))
-         `(:start ,line-start :end ,line-end :face ,face :rx ,pattern))))))
-
 (defun logview--read-patterns (buffer)
   "Read patterns from BUFFER as s-exps"
-  (let* ((patterns (logview--buffer-to-sexps buffer))
+  (let* ((sexps (logview--buffer-to-sexps buffer))
          (delimiter '(or bos bol))
-         result
-         (normalize (lambda (input)
-                      (pcase-exhaustive input
-                        (`(,_ ,_ (delimiter ,del))   (setq delimiter del))
-                        (_                           (push (logview--normalize-pattern input) result))))))
-    (mapcar normalize patterns)
-    `(,(logview--rx-compile delimiter) . ,result)))
+         patterns)
+    (pcase-dolist (`(,beg-pos ,end-pos ,sexp) sexps)
+      (pcase-exhaustive sexp
+        (`(delimiter ,del) (setq delimiter del))
+        ((pred stringp) (push (logview-pattern-create :include (list sexp))
+                              patterns))
+        ((pred listp) (push (logview--parse-pattern sexp beg-pos end-pos) patterns))))
+    (cons delimiter patterns)))
 
 (defun logview--intercalate (separator l)
   "Return a list where SEPARATOR is inserted between elements of L."
@@ -287,20 +299,6 @@ Use `seq' if you need standard rx behavior."
   "Compile rx pattern PAT to string"
   (rx-let-eval logview-rx-bindings
     (rx-to-string (logview--preprocess-rx pat) t)))
-
-(defun logview--compile-patterns (patterns)
-  "Compile rx patterns into string form"
-  (let ((faces logview-default-faces))
-    (mapcar
-     (lambda (pat)
-       ;; Cycle faces if reached the end of the default list:
-       (unless faces (setq faces logview-default-faces))
-       ;; Compile pattern:
-       (let* ((raw-patterns (plist-get pat :rx))
-              (patterns (mapcar #'logview--rx-compile raw-patterns))
-              (face (or (plist-get pat :face) (pop faces))))
-         (plist-put (plist-put pat :rx patterns) :face face)))
-     patterns)))
 
 ;;;###autoload
 (defun logview--find-pattern-buffer (change)
