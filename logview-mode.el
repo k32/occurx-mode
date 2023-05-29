@@ -122,22 +122,26 @@
 (defun logview--run-pattern (p begin bound)
   "Run a list of regular expressions PATTERN.
 If all of them match, return list of positions of all matches, `nil' overwise."
-  (let ((check-exclude
-         (lambda ()
-           (not (cl-loop for re in (logview-pattern-exclude p)
-                         for found = (progn
-                                       (goto-char begin)
-                                       (re-search-forward re bound t))
-                         when found return t)))))
-    (cl-loop for re in (logview-pattern-include p)
-             for found = (progn
-                           (goto-char begin)
-                           (cl-loop while (re-search-forward re bound t)
-                                    collect (list (match-beginning 0)
-                                                  (match-end 0)
-                                                  (logview-pattern-face p))))
-             if (and found (funcall check-exclude)) append found
-             else return nil)))
+  (let ((result
+         (cl-loop for re in (logview-pattern-include p)
+                  for found = (progn
+                                (goto-char begin)
+                                (cl-loop while (re-search-forward re bound t)
+                                         collect (list (match-beginning 0)
+                                                       (match-end 0)
+                                                       (logview-pattern-face p))))
+                  if found append found
+                  else return nil)))
+    (and result
+         ;; If something was found, run exclusion patterns:
+         (cl-loop for re in (logview-pattern-exclude p)
+                  for found = (progn
+                                (goto-char begin)
+                                (re-search-forward re bound t))
+                  if found return nil
+                  finally return t)
+         ;; If exclusion patterns weren't found, return `result':
+         result)))
 
 (defun logview--match-intervals (entry-beginning begin bound matches)
   (let* (acc
