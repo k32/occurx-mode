@@ -3,10 +3,10 @@
 ;; Copyright (C) 2023  k32
 
 ;; Author: k32 <example@example.com>
-;; Keywords: logs occur
+;; Keywords: matching
 ;; Version: 0.1
-;; Homepage: https://github.com/k32/snabbkaffe-mode
-;; Package-Requires: ((emacs "25.1") (rbit "0.1"))
+;; Homepage: https://github.com/k32/occurx-mode
+;; Package-Requires: ((emacs "27.1") (rbit "0.1"))
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -48,17 +48,19 @@
 (require 'cl-lib)
 (require 'rbit)
 
+;;; Code:
+
 ;;; Customizable settings
 
 (defcustom occurx-max-matches
   1
-  "How many matches should be highlighted per entry by default"
+  "How many matches should be highlighted per entry by default."
   :type 'integer
   :group 'occurx)
 
 (defcustom occurx-delimiter-face
   font-lock-comment-face
-  "Face used to display log delimiters"
+  "Face used to display log delimiters."
   :type 'face
   :group 'occurx)
 
@@ -66,7 +68,7 @@
   '((((type tty)) :inherit underline)
     (((type pc)) :inherit escape-glyph)
     (t :height 0.6))
-   "Face used to display ellipsis that are shown in place of skipped fragments of the log entry"
+   "Face used to display ellipsis that are shown in place of skipped fragments of the log entry."
   :group 'occurx)
 
 (defcustom occurx-rx-bindings
@@ -75,7 +77,7 @@
     (=> (a b) (seq a (* blank) "=>" (* blank) b))
     (kind (a) (=> "'$kind'" a))
     (meta (k v) (=> "'~meta'" (seq "#{" (* nonl) (group (=> k v))))))
-  "List of additional definitions that is passed to `rx-let-eval'"
+  "List of additional definitions that is passed to `rx-let-eval'."
   :type '(repeat sexp)
   :group 'occurx)
 
@@ -87,7 +89,7 @@
 
 (defcustom occurx-context
   10
-  "Size of the context that shown around matches"
+  "Size of the context that shown around matches."
   :type 'integer
   :group 'occurx)
 
@@ -95,7 +97,7 @@
 
 ;;;###autoload
 (define-minor-mode occurx-mode
-  "Minor mode for viewing logs"
+  "Minor mode for viewing logs."
   :lighter "🪵"
   :keymap (list (cons (kbd "q") #'quit-window)
                 (cons (kbd "o") #'occurx-pattern-buffer)
@@ -106,7 +108,7 @@
   (read-only-mode t))
 
 (defun occurx--occur-buffer (source-buffer)
-  "Create or get occur buffer for the given SOURCE-BUFFER"
+  "Create or get occur buffer for the given SOURCE-BUFFER."
   (get-buffer-create (concat "*Occur* " (buffer-name source-buffer)) t))
 
 ;; Pattern struct
@@ -115,7 +117,10 @@
   re n-matches sub-expr)
 
 (cl-defun occurx-matcher-create (&key re &key n-matches &key sub-expr)
-  "Constructor for `occurx-matcher'"
+  "Constructor for `occurx-matcher'.
+Optional argument RE rx expression.
+Optional argument N-MATCHES maximum number of matches to highlight.
+Optional argument SUB-EXPR sub-match pattern for the regexp."
   (occurx-matcher--create :re (occurx--rx-compile re)
                           :n-matches (or n-matches occurx-max-matches)
                           :sub-expr (or sub-expr 0)))
@@ -123,7 +128,7 @@
 (defvar-local occurx--default-faces occurx-default-faces)
 
 (defun occurx--default-face ()
-  "Get default face"
+  "Get default face."
   (unless occurx--default-faces
     (setq-local occurx--default-faces occurx-default-faces))
   (pop occurx--default-faces))
@@ -132,7 +137,8 @@
   include exclude face orig-pos)
 
 (defun occurx-pattern-create (input)
-  "Constructor for `occurx-pattern'"
+  "Constructor for `occurx-pattern'.
+Argument INPUT s-expression containing pattern specification ."
   (let (include exclude face n-matches negated (l input) pattern sub)
     (while l
       (pcase l
@@ -156,9 +162,10 @@
 ;;; Occur
 
 (defun occurx--run-pattern (p begin bound)
-  "Run pattern P in the fragment of the current buffer delimited by BEGIN and BOUND.
+  "Run pattern P in the fragment of the current buffer.
+Search is delimited by BEGIN and BOUND.
 If all of `include' regexps match and none of `exclude' regexps
-match, return list of positions of all matches, `nil' overwise."
+match, return list of positions of all matches, nil overwise."
   (let ((result
          (cl-loop for matcher in (occurx-pattern-include p)
                   for found = (let ((re (occurx-matcher-re matcher))
@@ -196,7 +203,7 @@ match, return list of positions of all matches, `nil' overwise."
     (rbit-to-list acc)))
 
 (defun occurx--on-match (entry-beginning begin bound matches orig-buf occur-buf)
-  "This function is called when a pattern match is found"
+  "This function is called when a pattern match is found."
   (with-current-buffer occur-buf
     (let (chunk-begin offset prev-max)
       (pcase-dolist (`(,min ,max ,face) (occurx--match-intervals entry-beginning begin bound matches))
@@ -219,6 +226,8 @@ match, return list of positions of all matches, `nil' overwise."
         (insert-char ?\n)))))
 
 (defun occurx--run-patterns (delimiter patterns orig-buf occur-buf)
+  "Run PATTERNS from OCCUR-BUF in ORIG-BUF.
+DELIMITER specifies an rx expression separating entries."
   (let (entry-beginning body-beginning next-entry-beginning next-body-beginning)
     ;; Initialization of the loop:
     (setq body-beginning (re-search-forward delimiter nil t)
@@ -266,7 +275,8 @@ match, return list of positions of all matches, `nil' overwise."
 
 ;;;###autoload
 (defun occurx-run ()
-  "Read a set of `rx' patterns from the current buffer, read list of
+  "Run pattern from the currently open buffer.
+Read a set of `rx' patterns from the current buffer, read list of
 ``dependent buffers'' from a buffer variable and filter out
 entries matching the patterns to occur buffer"
   (interactive "")
@@ -277,7 +287,7 @@ entries matching the patterns to occur buffer"
 
 ;;;; Occur major mode
 (defun occurx-occur-visit-source ()
-  "Jump to the occurrance in the original buffer"
+  "Jump to the occurrance in the original buffer."
   (interactive)
   (let ((pos (get-text-property (point) 'occurx-pointer)))
     (when pos
@@ -286,7 +296,7 @@ entries matching the patterns to occur buffer"
                                              (direction . right))))
       (goto-char pos))))
 
-(defvar occurx-occur-mode-map nil "Keymap for occurx-occur-mode")
+(defvar occurx-occur-mode-map nil "Keymap for `occurx-occur-mode'.")
 (setq occurx-occur-mode-map (make-sparse-keymap))
 
 (define-key occurx-occur-mode-map (kbd "<return>") #'occurx-occur-visit-source)
@@ -302,7 +312,7 @@ entries matching the patterns to occur buffer"
 ;;;; Pattern buffer
 
 (defun occurx--buffer-to-sexps (buffer)
-  "Parse BUFFER into a list of sexps"
+  "Parse BUFFER into a list of sexps."
   (with-current-buffer buffer
     (save-excursion
       (let (sexps
@@ -318,7 +328,7 @@ entries matching the patterns to occur buffer"
         (reverse sexps)))))
 
 (defun occurx--read-patterns (buffer)
-  "Read patterns from BUFFER as s-exps"
+  "Read patterns from BUFFER as s-exps."
   (let* ((sexps (occurx--buffer-to-sexps buffer))
          (delimiter '(or bos bol))
          patterns)
@@ -345,13 +355,13 @@ Use `seq' if you need standard rx behavior."
     (_              pat)))
 
 (defun occurx--rx-compile (pat)
-  "Compile rx pattern PAT to string"
+  "Compile rx pattern PAT to string."
   (rx-let-eval occurx-rx-bindings
     (rx-to-string (occurx--preprocess-rx pat) t)))
 
-;;;###autoload
 (defun occurx--find-pattern-buffer (change)
-  "Find or create a buffer that stores the pattern for the current buffer."
+  "Find or create a buffer that stores the pattern for the current buffer.
+If CHANGE is not nil then ask user to specify new name for the pattern file."
   (unless (and (boundp 'occurx-pattern-buffer)
                (get-buffer occurx-pattern-buffer) ; Buffer's alive
                (not change))                      ; User doesn't want to change it
@@ -361,7 +371,8 @@ Use `seq' if you need standard rx behavior."
 
 ;;;###autoload
 (defun occurx-pattern-buffer (&optional change)
-  "Switch to the pattern buffer"
+  "Switch to the pattern buffer.
+If CHANGE is not nil then ask user to specify new file name for the pattern."
   (interactive "P")
   (let ((orig-buf (buffer-name))
         (pattern-buf (occurx--find-pattern-buffer change)))
@@ -374,7 +385,7 @@ Use `seq' if you need standard rx behavior."
     (push orig-buf occurx-dependent-buffers)
     pattern-buf))
 
-(defvar occurx-pattern-mode-map nil "Keymap for occurx-pattern-mode")
+(defvar occurx-pattern-mode-map nil "Keymap for `occurx-pattern-mode'.")
 (setq occurx-pattern-mode-map (make-sparse-keymap))
 (define-key occurx-pattern-mode-map (kbd "C-c C-c") #'occurx-run)
 
