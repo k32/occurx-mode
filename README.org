@@ -62,6 +62,14 @@ It's possible to highlight only a specific sub-match of the regexp using =:sub N
 (:sub 1 (seq "foo" (group "bar"))) ; Entry must contain "foobar", but only "bar" is highlighted
 #+end_src
 
+* Entry delimiter
+
+By default entries are delimited by \n, but it's possible to override this behavior by adding the following expression to the search buffer.
+
+#+begin_src elisp
+(delimiter RX-expression)
+#+end_src
+
 * RX amendments
 
 Behavior of =(and X Y Z)= construct is changed so it inserts ".*" between sub-expressions.
