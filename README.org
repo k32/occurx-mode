@@ -1,4 +1,67 @@
 #+TITLE: snabbkaffe-mode
 
-An Emacs plugin for filtering log files.
-It improves upon =occur= command by letting the user specify the search pattern using [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Rx-Notation.html][rx]] notation written in a regular buffer (rather than the minibuffer).
+An Emacs plugin for filtering large log files.
+
+Improvements over =occur=:
+- Patterns are specified using [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Rx-Notation.html][rx]] notation in a regular buffer rather than minibuffer
+- Patterns can be easily saved and restored
+- It's possible to specify multiple patterns, and =occurx= will highlight them with different colors
+- Searches are not limited to a single line, it's possible to use a custom delimiter for log entries
+- It's possible to match multiple regexps for each entry and to negate regular expressions
+
+* Teaser
+
+[[./screenshot.png]]
+
+* How to
+1. Open a log file
+2. Run =M-x occurx-mode=
+3. Type =o= to open a new buffer where search patterns can be entered
+4. Type =C-c C-c= to run the patterns
+
+* Search patterns
+
+Pattern buffer is parsed as an ELisp file, producing a list of sexps.
+Examples:
+
+** Literal strings
+
+Strings are treated literally:
+
+#+begin_src elisp
+"String"
+"[a-b]"
+#+end_src
+
+The above example will search for entries containing literal text =String= or =[a-b]= and highlight them in different colors.
+
+** Regular expressions
+
+#+begin_src elisp
+((or "foo" "bar")) ; Search for regexp "foo|bar" and choose a random face to highlight the pattern
+(:face hi-yellow (seq "foo" "bar")) ; Highlight pattern with a specific face
+#+end_src
+
+** Multiple matches
+
+#+begin_src elisp
+("foo" (or "bar" "baz")) ; Entry must contain both "foo" and "bar|baz" in any order
+#+end_src
+
+** Negation
+=:not= keyword allows to inverse matches:
+
+#+begin_src elisp
+(:not "foo" (or "bar" "baz")) ; Entry most contain "bar|baz", but not "foo"
+#+end_src
+
+** Sub-matches
+It's possible to highlight only a specific sub-match of the regexp using =:sub N= construction:
+
+#+begin_src elisp
+(:sub 1 (seq "foo" (group "bar"))) ; Entry must contain "foobar", but only "bar" is highlighted
+#+end_src
+
+* RX amendments
+
+Behavior of =(and X Y Z)= construct is changed so it inserts ".*" between sub-expressions.
