@@ -96,6 +96,10 @@
 
 ;;; Source buffer
 
+(defvar-local occurx-pattern-buffer
+    nil
+  "Id of the dedicated pattern buffer.")
+
 ;;;###autoload
 (define-minor-mode occurx-mode
   "Minor mode for viewing logs."
@@ -313,6 +317,10 @@ entries matching the patterns to occur buffer"
 
 ;;;; Pattern buffer
 
+(defvar-local occurx-dependent-buffers
+    nil
+  "Ids of source buffers using this pattern.")
+
 (defun occurx--buffer-to-sexps (buffer)
   "Parse BUFFER into a list of sexps."
   (with-current-buffer buffer
@@ -365,6 +373,7 @@ Use `seq' if you need standard rx behavior."
   "Find or create a buffer that stores the pattern for the current buffer.
 If CHANGE is not nil then ask user to specify new name for the pattern file."
   (unless (and (boundp 'occurx-pattern-buffer)
+               occurx-pattern-buffer
                (get-buffer occurx-pattern-buffer) ; Buffer's alive
                (not change))                      ; User doesn't want to change it
     (setq-local occurx-pattern-buffer
