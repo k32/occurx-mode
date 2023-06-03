@@ -307,6 +307,7 @@ entries matching the patterns to occur buffer"
   "🪡"
   :syntax-table nil
   :abbrev-table nil
+  (buffer-disable-undo (current-buffer))
   (setq-local occurx-orig-buffer nil))
 
 ;;;; Pattern buffer
