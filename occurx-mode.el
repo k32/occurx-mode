@@ -68,8 +68,7 @@
   '((((type tty)) :inherit underline)
     (((type pc)) :inherit escape-glyph)
     (t :height 0.6))
-  "Face used to display ellipsis that are shown in place of skipped fragments
- of the log entry."
+  "Face used to display ellipsis."
   :group 'occurx)
 
 (defcustom occurx-rx-bindings
@@ -195,6 +194,10 @@ match, return list of positions of all matches, nil overwise."
          result)))
 
 (defun occurx--match-intervals (entry-beginning begin bound matches)
+  "Add context to the intervals MATCHES.
+ENTRY-BEGINNING specifies beginning of the entry.
+BEGIN specifies beginning of the entry's body.
+BOUND specifies upper bound of the entry."
   (let* (acc
          (push-interval (lambda (beg end face)
                           (if (= beg end)
@@ -208,7 +211,13 @@ match, return list of positions of all matches, nil overwise."
     (rbit-to-list acc)))
 
 (defun occurx--on-match (entry-beginning begin bound matches orig-buf occur-buf)
-  "This function is called when a pattern match is found."
+  "This function is called when a pattern match is found.
+ENTRY-BEGINNING specifies beginning of the entry.
+BEGIN specifies beginning of the entry's body.
+BOUND specifies upper bound of the entry.
+ORIG-BUF is id of the source buffer.
+OCCUR-BUF is id of the occur buffer.
+MATCHES is list of elements of type `(match-begin match-end face)'."
   (with-current-buffer occur-buf
     (let (chunk-begin offset prev-max)
       (pcase-dolist (`(,min ,max ,face) (occurx--match-intervals entry-beginning begin bound matches))
@@ -259,6 +268,7 @@ DELIMITER specifies an rx expression separating entries."
       (when body-beginning (goto-char body-beginning)))))
 
 (defun occurx--occur (pattern-buf orig-buf delimiter patterns)
+  "Search PATTERNS from PATTERN-BUF in ORIG-BUF separated by DELIMITER."
   (let ((occur-buf (occurx--occur-buffer (current-buffer))))
     (set-window-dedicated-p
      (display-buffer occur-buf
@@ -291,6 +301,10 @@ entries matching the patterns to occur buffer"
       (occurx--occur (current-buffer) buf (occurx--rx-compile delimiter) patterns))))
 
 ;;;; Occur major mode
+
+(defvar-local occurx-orig-buffer nil
+  "Id of the source buffer.")
+
 (defun occurx-occur-visit-source ()
   "Jump to the occurrance in the original buffer."
   (interactive)
@@ -342,7 +356,7 @@ entries matching the patterns to occur buffer"
   (let* ((sexps (occurx--buffer-to-sexps buffer))
          (delimiter '(or bos bol))
          patterns)
-    (pcase-dolist (`(,beg-pos ,end-pos ,sexp) sexps)
+    (pcase-dolist (`(,_ ,_ ,sexp) sexps)
       (pcase-exhaustive sexp
         (`(delimiter ,del) (setq delimiter del))
         ((pred stringp) (push (occurx-pattern-create (list sexp)) patterns))

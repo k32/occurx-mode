@@ -1,4 +1,4 @@
-#+TITLE: snabbkaffe-mode
+#+TITLE: occurx-mode
 
 An Emacs plugin for filtering large log files.
 
@@ -52,7 +52,7 @@ The above example will search for entries containing text =String= or =[a-b]= an
 =:not= keyword allows to inverse patterns:
 
 #+begin_src elisp
-(:not "foo" (or "bar" "baz")) ; Entry most contain "bar|baz", but not "foo"
+(:not "foo" (or "bar" "baz")) ; Entry must contain "bar|baz", but not "foo"
 #+end_src
 
 ** Sub-matches
