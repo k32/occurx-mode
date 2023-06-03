@@ -68,7 +68,8 @@
   '((((type tty)) :inherit underline)
     (((type pc)) :inherit escape-glyph)
     (t :height 0.6))
-   "Face used to display ellipsis that are shown in place of skipped fragments of the log entry."
+  "Face used to display ellipsis that are shown in place of skipped fragments
+ of the log entry."
   :group 'occurx)
 
 (defcustom occurx-rx-bindings
@@ -154,7 +155,7 @@ Argument INPUT s-expression containing pattern specification ."
          (setq l rest
                n-matches nil
                negated nil
-               expr nil))))
+               sub nil))))
     (occurx-pattern--create :face (or face (occurx--default-face))
                             :include include
                             :exclude exclude)))
@@ -169,7 +170,7 @@ match, return list of positions of all matches, nil overwise."
   (let ((result
          (cl-loop for matcher in (occurx-pattern-include p)
                   for found = (let ((re (occurx-matcher-re matcher))
-                                    (n (occurx-matcher-n-matches matcher))
+                                    ;(n (occurx-matcher-n-matches matcher)) TODO
                                     (e (occurx-matcher-sub-expr matcher)))
                                 (goto-char begin)
                                 (cl-loop while (re-search-forward re bound t)
