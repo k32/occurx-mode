@@ -2,12 +2,12 @@
 
 An Emacs plugin for filtering large log files.
 
-Improvements over =occur=:
-- Patterns are specified using [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Rx-Notation.html][rx]] notation in a regular buffer rather than minibuffer
-- Patterns can be easily saved and restored
-- It's possible to specify multiple patterns, and =occurx= will highlight them with different colors
-- Searches are not limited to a single line, it's possible to use a custom delimiter for log entries
-- It's possible to match multiple regexps for each entry and to negate regular expressions
+Improvements over the built-in =occur=:
+- Patterns are specified using [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Rx-Notation.html][rx notation]] in a regular buffer rather than  the minibuffer.
+- Patterns can be easily saved and restored.
+- It is possible to specify multiple patterns, and =occurx= will highlight them with different colors.
+- Searches are not limited to a single line; it is possible to use a custom delimiter.
+- It is possible to match multiple regular expressions for each entry and to negate regular expressions.
 
 * Teaser
 
@@ -16,7 +16,7 @@ Improvements over =occur=:
 * How to
 1. Open a log file
 2. Run =M-x occurx-mode=
-3. Type =o= to open a new buffer where search patterns can be entered
+3. Type =o= to open a new buffer and enter search patterns there
 4. Type =C-c C-c= to run the patterns
 
 * Search patterns
@@ -26,14 +26,14 @@ Examples:
 
 ** Literal strings
 
-Strings are treated literally:
+Strings are treated literally rather than as regexps:
 
 #+begin_src elisp
 "String"
 "[a-b]"
 #+end_src
 
-The above example will search for entries containing literal text =String= or =[a-b]= and highlight them in different colors.
+The above example will search for entries containing text =String= or =[a-b]= and highlight them with different colors.
 
 ** Regular expressions
 
@@ -49,7 +49,7 @@ The above example will search for entries containing literal text =String= or =[
 #+end_src
 
 ** Negation
-=:not= keyword allows to inverse matches:
+=:not= keyword allows to inverse patterns:
 
 #+begin_src elisp
 (:not "foo" (or "bar" "baz")) ; Entry most contain "bar|baz", but not "foo"
@@ -64,7 +64,7 @@ It's possible to highlight only a specific sub-match of the regexp using =:sub N
 
 * Entry delimiter
 
-By default entries are delimited by \n, but it's possible to override this behavior by adding the following expression to the search buffer.
+By default entries are delimited by \n, but it's possible to override the delimiter by adding the following expression to the search buffer:
 
 #+begin_src elisp
 (delimiter RX-expression)
@@ -73,3 +73,4 @@ By default entries are delimited by \n, but it's possible to override this behav
 * RX amendments
 
 Behavior of =(and X Y Z)= construct is changed so it inserts ".*" between sub-expressions.
+Use =(seq X Y Z)= if you need old behavior.

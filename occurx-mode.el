@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2023  k32
 
-;; Author: k32 <example@example.com>
+;; Author: k32
 ;; Keywords: matching
 ;; Version: 0.1
 ;; Homepage: https://github.com/k32/occurx-mode
