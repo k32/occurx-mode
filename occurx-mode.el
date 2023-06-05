@@ -288,18 +288,6 @@ DELIMITER specifies an rx expression separating entries."
     (with-current-buffer occur-buf
       (read-only-mode))))
 
-;;;###autoload
-(defun occurx-run ()
-  "Run pattern from the currently open buffer.
-Read a set of `rx' patterns from the current buffer, read list of
-``dependent buffers'' from a buffer variable and filter out
-entries matching the patterns to occur buffer"
-  (interactive "")
-  (setq-local occurx--default-faces nil)
-  (seq-let (delimiter &rest patterns) (occurx--read-patterns (current-buffer))
-    (dolist (buf occurx-dependent-buffers)
-      (occurx--occur (current-buffer) buf (occurx--rx-compile delimiter) patterns))))
-
 ;;;; Occur major mode
 
 (defvar-local occurx-orig-buffer nil
@@ -334,6 +322,18 @@ entries matching the patterns to occur buffer"
 (defvar-local occurx-dependent-buffers
     nil
   "Ids of source buffers using this pattern.")
+
+;;;###autoload
+(defun occurx-run ()
+  "Run pattern from the currently open buffer.
+Read a set of `rx' patterns from the current buffer, read list of
+``dependent buffers'' from a buffer variable and filter out
+entries matching the patterns to occur buffer"
+  (interactive "")
+  (setq-local occurx--default-faces nil)
+  (seq-let (delimiter &rest patterns) (occurx--read-patterns (current-buffer))
+    (dolist (buf occurx-dependent-buffers)
+      (occurx--occur (current-buffer) buf (occurx--rx-compile delimiter) patterns))))
 
 (defun occurx--buffer-to-sexps (buffer)
   "Parse BUFFER into a list of sexps."
