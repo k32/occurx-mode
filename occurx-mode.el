@@ -102,7 +102,7 @@
 ;;;###autoload
 (define-minor-mode occurx-mode
   "Minor mode for viewing logs."
-  :lighter "🪵"
+  :lighter " 🪵"
   :keymap (list (cons (kbd "q") #'quit-window)
                 (cons (kbd "o") #'occurx-pattern-buffer)
                 (cons (kbd "<SPC>") #'scroll-down-command)
@@ -303,15 +303,16 @@ DELIMITER specifies an rx expression separating entries."
                                              (direction . right))))
       (goto-char pos))))
 
-(defvar occurx-occur-mode-map nil "Keymap for `occurx-occur-mode'.")
-(setq occurx-occur-mode-map (make-sparse-keymap))
-
-(define-key occurx-occur-mode-map (kbd "<return>") #'occurx-occur-visit-source)
-(define-key occurx-occur-mode-map (kbd "o") #'occurx-pattern-buffer)
-(define-key occurx-occur-mode-map [mouse-1] #'occurx-occur-visit-source)
+(defvar occurx-occur-mode-map
+  (let ((km (make-sparse-keymap)))
+    (define-key km (kbd "<return>") #'occurx-occur-visit-source)
+    (define-key km (kbd "o") #'occurx-pattern-buffer)
+    (define-key km [mouse-1] #'occurx-occur-visit-source)
+    km)
+  "Keymap for `occurx-occur-mode'.")
 
 (define-derived-mode occurx-occur-mode fundamental-mode
-  "🪡"
+  " 🪡"
   :syntax-table nil
   :abbrev-table nil
   (buffer-disable-undo (current-buffer))
@@ -410,15 +411,16 @@ If CHANGE is not nil then ask user to specify new file name for the pattern."
     (push orig-buf occurx-dependent-buffers)
     pattern-buf))
 
-(defvar occurx-pattern-mode-map nil "Keymap for `occurx-pattern-mode'.")
-(setq occurx-pattern-mode-map (make-sparse-keymap))
-(define-key occurx-pattern-mode-map (kbd "C-c C-c") #'occurx-run)
+(defvar occurx-pattern-mode-map
+  (let ((km (make-sparse-keymap)))
+    (define-key km (kbd "C-c C-c") #'occurx-run)
+    km)
+  "Keymap for `occurx-pattern-mode'.")
 
 (define-derived-mode occurx-pattern-mode emacs-lisp-mode
-  "🔍"
+  " 🔍"
   :syntax-table nil
-  :abbrev-table nil
-  (setq-local occurx-dependent-buffers nil))
+  :abbrev-table nil)
 
 (provide 'occurx-mode)
 ;;; occurx-mode.el ends here
