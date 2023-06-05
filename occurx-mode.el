@@ -102,7 +102,7 @@
 ;;;###autoload
 (define-minor-mode occurx-mode
   "Minor mode for viewing logs."
-  :lighter "🪵"
+  :lighter " 🪵"
   :keymap (list (cons (kbd "q") #'quit-window)
                 (cons (kbd "o") #'occurx-pattern-buffer)
                 (cons (kbd "<SPC>") #'scroll-down-command)
@@ -219,7 +219,7 @@ ORIG-BUF is id of the source buffer.
 OCCUR-BUF is id of the occur buffer.
 MATCHES is list of elements of type `(match-begin match-end face)'."
   (with-current-buffer occur-buf
-    (let (chunk-begin offset prev-max)
+    (let (chunk-begin prev-max)
       (pcase-dolist (`(,min ,max ,face) (occurx--match-intervals entry-beginning begin bound matches))
         ;; Insert ellipsis if fragment is skipped
         (when (and prev-max (> min prev-max))
@@ -227,7 +227,6 @@ MATCHES is list of elements of type `(match-begin match-end face)'."
           (add-face-text-property (- (point) 3) (point) 'occurx-ellipsis-face))
         ;; Copy contexts of the source buffer to the occur buffer:
         (setq chunk-begin (point)
-              offset (- chunk-begin min)
               prev-max max)
         (insert-buffer-substring orig-buf min max)
         ;; Add property that allows to jump to the source
@@ -288,18 +287,6 @@ DELIMITER specifies an rx expression separating entries."
     (with-current-buffer occur-buf
       (read-only-mode))))
 
-;;;###autoload
-(defun occurx-run ()
-  "Run pattern from the currently open buffer.
-Read a set of `rx' patterns from the current buffer, read list of
-``dependent buffers'' from a buffer variable and filter out
-entries matching the patterns to occur buffer"
-  (interactive "")
-  (setq-local occurx--default-faces nil)
-  (seq-let (delimiter &rest patterns) (occurx--read-patterns (current-buffer))
-    (dolist (buf occurx-dependent-buffers)
-      (occurx--occur (current-buffer) buf (occurx--rx-compile delimiter) patterns))))
-
 ;;;; Occur major mode
 
 (defvar-local occurx-orig-buffer nil
@@ -315,15 +302,16 @@ entries matching the patterns to occur buffer"
                                              (direction . right))))
       (goto-char pos))))
 
-(defvar occurx-occur-mode-map nil "Keymap for `occurx-occur-mode'.")
-(setq occurx-occur-mode-map (make-sparse-keymap))
-
-(define-key occurx-occur-mode-map (kbd "<return>") #'occurx-occur-visit-source)
-(define-key occurx-occur-mode-map (kbd "o") #'occurx-pattern-buffer)
-(define-key occurx-occur-mode-map [mouse-1] #'occurx-occur-visit-source)
+(defvar occurx-occur-mode-map
+  (let ((km (make-sparse-keymap)))
+    (define-key km (kbd "<return>") #'occurx-occur-visit-source)
+    (define-key km (kbd "o") #'occurx-pattern-buffer)
+    (define-key km [mouse-1] #'occurx-occur-visit-source)
+    km)
+  "Keymap for `occurx-occur-mode'.")
 
 (define-derived-mode occurx-occur-mode fundamental-mode
-  "🪡"
+  " 🪡"
   :syntax-table nil
   :abbrev-table nil
   (buffer-disable-undo (current-buffer))
@@ -334,6 +322,18 @@ entries matching the patterns to occur buffer"
 (defvar-local occurx-dependent-buffers
     nil
   "Ids of source buffers using this pattern.")
+
+;;;###autoload
+(defun occurx-run ()
+  "Run pattern from the currently open buffer.
+Read a set of `rx' patterns from the current buffer, read list of
+``dependent buffers'' from a buffer variable and filter out
+entries matching the patterns to occur buffer"
+  (interactive "")
+  (setq-local occurx--default-faces nil)
+  (seq-let (delimiter &rest patterns) (occurx--read-patterns (current-buffer))
+    (dolist (buf occurx-dependent-buffers)
+      (occurx--occur (current-buffer) buf (occurx--rx-compile delimiter) patterns))))
 
 (defun occurx--buffer-to-sexps (buffer)
   "Parse BUFFER into a list of sexps."
@@ -410,15 +410,16 @@ If CHANGE is not nil then ask user to specify new file name for the pattern."
     (push orig-buf occurx-dependent-buffers)
     pattern-buf))
 
-(defvar occurx-pattern-mode-map nil "Keymap for `occurx-pattern-mode'.")
-(setq occurx-pattern-mode-map (make-sparse-keymap))
-(define-key occurx-pattern-mode-map (kbd "C-c C-c") #'occurx-run)
+(defvar occurx-pattern-mode-map
+  (let ((km (make-sparse-keymap)))
+    (define-key km (kbd "C-c C-c") #'occurx-run)
+    km)
+  "Keymap for `occurx-pattern-mode'.")
 
 (define-derived-mode occurx-pattern-mode emacs-lisp-mode
-  "🔍"
+  " 🔍"
   :syntax-table nil
-  :abbrev-table nil
-  (setq-local occurx-dependent-buffers nil))
+  :abbrev-table nil)
 
 (provide 'occurx-mode)
 ;;; occurx-mode.el ends here
