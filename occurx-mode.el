@@ -219,7 +219,7 @@ ORIG-BUF is id of the source buffer.
 OCCUR-BUF is id of the occur buffer.
 MATCHES is list of elements of type `(match-begin match-end face)'."
   (with-current-buffer occur-buf
-    (let (chunk-begin offset prev-max)
+    (let (chunk-begin prev-max)
       (pcase-dolist (`(,min ,max ,face) (occurx--match-intervals entry-beginning begin bound matches))
         ;; Insert ellipsis if fragment is skipped
         (when (and prev-max (> min prev-max))
@@ -227,7 +227,6 @@ MATCHES is list of elements of type `(match-begin match-end face)'."
           (add-face-text-property (- (point) 3) (point) 'occurx-ellipsis-face))
         ;; Copy contexts of the source buffer to the occur buffer:
         (setq chunk-begin (point)
-              offset (- chunk-begin min)
               prev-max max)
         (insert-buffer-substring orig-buf min max)
         ;; Add property that allows to jump to the source
