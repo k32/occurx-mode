@@ -163,8 +163,22 @@ Argument INPUT s-expression containing pattern specification ."
                             :include include
                             :exclude exclude)))
 
-;;; Occur
+(defun occurx--check-negation-patterns (l begin bound)
+  "Return t if negation patterns do not match.
+Return nil if one of the negation patterns from the list L is
+found in the fragment of the current buffer delimited by BEGIN
+and BOUND."
+  (not (and l
+            (cl-loop for matcher in l
+                     for found = (progn
+                                   (goto-char begin)
+                                   (re-search-forward (occurx-matcher-re matcher)
+                                                      bound
+                                                      t))
+                     always found
+                     finally return t))))
 
+;;; Occur
 (defun occurx--run-pattern (p begin bound)
   "Run pattern P in the fragment of the current buffer.
 Search is delimited by BEGIN and BOUND.
@@ -184,12 +198,7 @@ match, return list of positions of all matches, nil overwise."
                   else return nil)))
     (and result
          ;; If all include pattern were found, run exclusion patterns:
-         (cl-loop for re in (occurx-pattern-exclude p)
-                  for found = (progn
-                                (goto-char begin)
-                                (re-search-forward re bound t))
-                  if found return nil
-                  finally return t)
+         (occurx--check-negation-patterns (occurx-pattern-exclude p) begin bound)
          ;; If exclusion patterns weren't found, return `result':
          result)))
 
@@ -254,12 +263,12 @@ DELIMITER specifies an rx expression separating entries."
       ;; Match entry's body against patterns, stop on first match:
       (cl-loop for pattern in patterns
                for matches = (occurx--run-pattern pattern
-                                                   body-beginning
-                                                   next-entry-beginning)
+                                                  body-beginning
+                                                  next-entry-beginning)
                if matches
                return (occurx--on-match entry-beginning body-beginning next-entry-beginning
-                                         matches
-                                         orig-buf occur-buf)
+                                        matches
+                                        orig-buf occur-buf)
                end)
       ;; Move forward:
       (setq body-beginning next-body-beginning
@@ -384,7 +393,7 @@ Use `seq' if you need standard rx behavior."
     (rx-to-string (occurx--preprocess-rx pat) t)))
 
 (defun occurx--find-pattern-buffer (change)
-  "Find or create a buffer that stores the pattern for the current buffer.
+  "Find or create a buffer containing the pattern for the current buffer.
 If CHANGE is not nil then ask user to specify new name for the pattern file."
   (unless (and (boundp 'occurx-pattern-buffer)
                occurx-pattern-buffer
