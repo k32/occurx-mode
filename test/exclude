@@ -1,0 +1,7 @@
+foo bar (match)
+bar foo (match)
+foo excl1 bar excl2 (nomatch)
+excl1 foo bar excl2 (nomatch)
+excl2 foo bar excl1 (nomatch)
+excl1 foo quuz bar (match)
+foo bar excl2 (match)
